@@ -3,12 +3,15 @@
             [compojure.route :as route]
             [cheshire.core :as json]
             [clojure.java.jdbc :as db]
-            [ring.middleware.defaults :refer [wrap-defaults site-defaults]]
-            [cemerick.friend :as friend]
-            (cemerick.friend [workflows :as workflows]
-                             [credentials :as creds])
-            [friend-oauth2.workflow :as oauth2]
-            [friend-oauth2.util :refer [format-config-uri get-access-token-from-params]]))
+            [ring.middleware.defaults :refer [wrap-defaults site-defaults]]))
+
+(defn logger [app]
+  (fn [req]
+    (println 
+      (apply str (interpose " "
+       [(:request-method req)
+        (:uri req)])))
+    (app req)))
 
 (defn get-index []
   "Hello world")
@@ -37,10 +40,14 @@
     (GET  "/" [] (get-all-documents))
     (POST "/" {body :body} (create-new-document body))
     (context "/:id" [id]
-      (GET "/" [] (get-document id))
-      (PUT "/" {body :body} (update-document id body))
+      (GET    "/" [] (get-document id))
+      (PUT    "/" {body :body} (update-document id body))
       (DELETE "/" [] (delete-document id))))
   (route/not-found "Not Found"))
 
+(def middlewares
+  (-> app-routes
+      logger))
+
 (def app
-  (wrap-defaults app-routes site-defaults))
+  (wrap-defaults middlewares site-defaults))
