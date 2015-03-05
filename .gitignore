@@ -8,3 +8,4 @@ pom.xml.asc
 *.class
 /.lein-*
 /.nrepl-port
+src/information_systems_lab1/facebook.clj
