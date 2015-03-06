@@ -16,6 +16,7 @@
 
 (defentity tokens)
 (defentity posts)
+(defentity songs)
 
 (defn logger [app]
   (fn [req]
@@ -33,21 +34,39 @@
 (defn get-index []
   "Hello world")
 
-(defn get-all-documents []
+(defn get-all-songs [params]
   (json/generate-string
-    (select posts)))
+    (select songs (limit (:limit params)) (offset (:offset params)))))
 
-(defn create-new-document []
-  "Create new document")
+(defn create-new-song [params]
+  (insert songs (values {:title  (:title  params)
+                         :artist (:artist params)
+                         :url    (:url    params)}))
+  (json/generate-string {:message "Song uploaded"}))
 
-(defn get-document [id]
-  (str id))
+(defn get-song [id]
+  (select songs (where {:id id})))
 
-(defn update-document [id params]
-  (str id " " params))
+(defn update-song [id params]
+  (update songs (set-fields (merge
+                              (if-let [title  (:title  params)] {:title  title})
+                              (if-let [artist (:artist params)] {:artist artist})
+                              (if-let [url    (:url    params)] {:url    url})))
+    (where {:id id}))
+  (select songs (where {:id id})))
 
-(defn delete-document [id]
-  (str id))
+(defn delete-song [id]
+  (delete songs (where {:id id}))
+  (json/generate-string {:message "Song deleted"}))
+
+(defroutes api-routes
+  (context "/songs" []
+    (GET  "/" {params :params} (get-all-songs params))
+    (POST "/" {params :params} (create-new-song params))
+    (context "/:id" [id]
+      (GET    "/" [] (get-song (read-string id)))
+      (PUT    "/" {params :params} (update-song (read-string id) params))
+      (DELETE "/" [] (delete-song (read-string id))))))
 
 (defn print-params [params]
   (str params))
@@ -55,6 +74,12 @@
 (defn parse-params [string]
   (clojure.walk/keywordize-keys
     (codec/form-decode string)))
+
+(defn fb-auth-redirect []
+  (res/redirect
+    (str "https://www.facebook.com/dialog/oauth?client_id=" client-id
+         "&response_type=" "code"
+         "&redirect_uri=" redirect-uri)))
 
 (defn get-token [code]
   (parse-params (:body (http/get 
@@ -67,7 +92,7 @@
   (parse-params (:body (http/get
     (str "https://graph.facebook.com/oauth/access_token?client_id=" client-id
          "&client_secret=" client-secret
-         "&grant_type=client_credentials")))))
+         "&grant_type=" "client_credentials")))))
 
 (defn inspect-token [token]
   (json/parse-string (:body (http/get
@@ -84,13 +109,11 @@
                             :expires_at (token-data "expires_at")
                             :user_id (token-data "user_id")}))))
   
-
 (defn current-timestamp []
   (quot (System/currentTimeMillis) 1000))
 
 (defroutes auth-routes
-  (GET "/" []
-    (res/redirect (str "https://www.facebook.com/dialog/oauth?client_id=" client-id "&response_type=code&redirect_uri=" redirect-uri)))
+  (GET "/fb" [] fb-auth-redirect)
   (GET "/success" {params :params}
     (save-token (:access_token (get-token (:code params)))))
   (GET "/inspect" {params :params}
@@ -99,24 +122,17 @@
     (get-fb-info (:token params)))
   (GET "/about" {user :user} (str user)))
 
-
 (defroutes app-routes
   (GET "/" {params :params} (print-params params))
-  (context "/api" []
-    (GET  "/" [] (get-all-documents))
-    (POST "/" {params :params} (create-new-document params))
-    (context "/:id" [id]
-      (GET    "/" [] (get-document id))
-      (PUT    "/" {params :params} (update-document id params))
-      (DELETE "/" [] (delete-document id))))
-  (context "/auth" []
-    auth-routes)
+  (context "/api" [] api-routes)
+  (context "/auth" [] auth-routes)
   (route/not-found "Not Found"))
 
-(def middlewares
-  (-> app-routes
-      logger
-      auth))
 
 (def app
-  (wrap-defaults middlewares site-defaults))
+  (wrap-defaults
+    (-> app-routes
+      logger
+      auth)
+    (-> site-defaults
+        (assoc-in [:security :anti-forgery] false))))
